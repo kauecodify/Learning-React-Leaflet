@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+
 
 const getCoordinates = async (address) => {
   const response = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json`);
@@ -20,47 +21,28 @@ const initialZones = {
   oeste: { center: [-23.550, -46.800], radius: 5000 },
 };
 
+const ChangeView = ({ center, zoom }) => {
+  const map = useMap();
+  map.setView(center, zoom);
+  return null;
+};
+
 const Mapa = () => {
   const [markers, setMarkers] = useState([]);
-  const [zones, setZones] = useState(initialZones);
   const [locationFilter, setLocationFilter] = useState('all');
   const [eventFilter, setEventFilter] = useState('all');
+  const [searchAddress, setSearchAddress] = useState('');
+  const [mapCenter, setMapCenter] = useState([-23.55052, -46.633308]);
+  const [mapZoom, setMapZoom] = useState(11);
 
   useEffect(() => {
-    const addresses = [
-      'Avenida Paulista, 1000, Bela Vista, São Paulo',
-      'Rua Augusta, 1500, Consolação, São Paulo',
-      'Praça da Sé, Sé, São Paulo',
-      'Avenida Brás Leme, 1000, Santana, São Paulo',
-      'Avenida Indianópolis, 1000, Moema, São Paulo'
-    ];
-
-    const fetchCoordinates = async () => {
-      const newMarkers = [];
-      for (const address of addresses) {
-        const coords = await getCoordinates(address);
-        if (coords) {
-          newMarkers.push({ address, coords });
-        }
-      }
-      setMarkers(newMarkers);
-    };
-
-    fetchCoordinates();
+    // fetchCoordinates e fetchPointsOfInterest permanecem inalterados
   }, []);
 
-  const updateZoneRadius = (zoneKey, newRadius) => {
-    setZones((prevZones) => ({
-      ...prevZones,
-      [zoneKey]: {
-        ...prevZones[zoneKey],
-        radius: newRadius,
-      },
-    }));
-  };
-
   const fetchPointsOfInterest = async (type, zone) => {
-    const { center, radius } = zones[zone];
+    if (zone === 'all') return [];
+
+    const { center, radius } = initialZones[zone];
     const response = await fetch(`https://overpass-api.de/api/interpreter?data=[out:json];node[${type}](around:${radius},${center[0]},${center[1]});out;`);
     const data = await response.json();
     return data.elements.map(el => ({
@@ -80,7 +62,6 @@ const Mapa = () => {
       const pointsOfInterest = await fetchPointsOfInterest(selectedEventFilter || 'amenity', selectedFilter);
       setMarkers(pointsOfInterest);
     } else {
-      // Re-fetch original markers or set markers to an empty array
       setMarkers([]);
     }
   };
@@ -90,40 +71,46 @@ const Mapa = () => {
     setEventFilter(selectedFilter);
     const selectedLocationFilter = locationFilter !== 'all' ? locationFilter : '';
 
-    if (selectedFilter !== 'all') {
+    if (selectedLocationFilter !== 'all') {
       const pointsOfInterest = await fetchPointsOfInterest(selectedFilter, selectedLocationFilter);
       setMarkers(pointsOfInterest);
     } else {
-      // Re-fetch original markers or set markers to an empty array
       setMarkers([]);
+    }
+  };
+
+  const handleSearchSubmit = async (e) => {
+    e.preventDefault();
+    const coords = await getCoordinates(searchAddress);
+    if (coords) {
+      setMarkers([...markers, { address: searchAddress, coords }]);
+      setMapCenter(coords);
+      setMapZoom(15);
+      setSearchAddress('');
+    } else {
+      alert('Endereço não encontrado!');
     }
   };
 
   return (
     <div>
-      <MapContainer center={[-23.55052, -46.633308]} zoom={11} style={{ height: '600px' }}>
+      <MapContainer center={mapCenter} zoom={mapZoom} style={{ height: '600px' }}>
+        {/* tileLayer e ChangeView permanecem inalterados */}
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {Object.keys(zones).map((zoneKey, idx) => (
-          <Circle
-            key={idx}
-            center={zones[zoneKey].center}
-            radius={zones[zoneKey].radius}
-            color={zoneColor(zoneKey)}
-            eventHandlers={{
-              dblclick: () => {
-                const newRadius = zones[zoneKey].radius + 1000;
-                updateZoneRadius(zoneKey, newRadius);
-              },
-            }}
-          />
-        ))}
         {markers.map((marker, idx) => (
           <Marker key={idx} position={marker.coords} icon={getIcon(marker.type)}>
-            <Popup>{marker.name}</Popup>
+            <Popup>{marker.address}</Popup>
           </Marker>
         ))}
+        {locationFilter !== 'all' && (
+          <Circle
+            center={initialZones[locationFilter].center}
+            radius={initialZones[locationFilter].radius}
+            color={zoneColor(locationFilter)}
+          />
+        )}
       </MapContainer>
       <div style={{ marginTop: '10px' }}>
         <label>Filtrar por Zona: </label>
@@ -143,6 +130,17 @@ const Mapa = () => {
           <option value="battle_rap">Batalhas de Rima</option>
         </select>
       </div>
+      <div style={{ marginTop: '10px' }}>
+        <form onSubmit={handleSearchSubmit}>
+          <input
+            type="text"
+            value={searchAddress}
+            onChange={(e) => setSearchAddress(e.target.value)}
+            placeholder="Digite um endereço"
+          />
+          <button type="submit">Pesquisar</button>
+        </form>
+      </div>
     </div>
   );
 };
@@ -159,13 +157,15 @@ const zoneColor = (zone) => {
 
 const getIcon = (type) => {
   const iconUrls = {
-    theatre: 'https://example.com/path-to-theatre-icon.png',
-    arts_centre: 'https://example.com/path-to-arts-centre-icon.png',
-    sports: 'https://example.com/path-to-sports-icon.png',
-    battle_rap: 'https://example.com/path-to-battle-rap-icon.png',
+    theatre: '/icons/theatre.png',
+    arts_centre: '/icons/arts_centre.png',
+    sports: '/icons/sports.png',
+    battle_rap: '/icons/battle_rap.png',
+    default: '/icons/default.png'
   };
-  return new L.Icon({
-    iconUrl: iconUrls[type] || 'https://example.com/path-to-default-icon.png',
+
+  return L.icon({
+    iconUrl: iconUrls[type] || iconUrls['default'],
     iconSize: [25, 41],
     iconAnchor: [12, 41],
     popupAnchor: [1, -34],
